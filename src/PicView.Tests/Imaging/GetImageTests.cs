@@ -81,7 +81,8 @@ public class GetImageTests : IDisposable
     {
         var path = CreateGradientImage(extension, withAlpha: extension != "jpg", width: 800, height: 600);
 
-        using var expected = Bitmap.DecodeToHeight(File.OpenRead(path), (int)height);
+        using var stream = File.OpenRead(path);
+        using var expected = Bitmap.DecodeToHeight(stream, (int)height);
         using var actual = await GetThumbnails.GetThumbAsync(new FileInfo(path), height);
 
         Assert.NotNull(actual);
