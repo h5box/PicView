@@ -29,5 +29,14 @@ public class GalleryItemViewModel : IDisposable
     public uint PixelWidth { get; set; }
     public uint PixelHeight { get; set; }
 
+    /// <summary>
+    /// The size the masonry and row layouts show the thumbnail at, set when the item is laid out,
+    /// so the thumbnail can be decoded at that size.
+    /// </summary>
+    public double DisplayWidth { get; set; }
+
+    /// <inheritdoc cref="DisplayWidth"/>
+    public double DisplayHeight { get; set; }
+
     public Func<CancellationToken, ValueTask<object?>>? ThumbnailLoaderFunc { get; set; }
 }

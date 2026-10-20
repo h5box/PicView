@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ImageMagick;
 using PicView.Core.DebugTools;
 using PicView.Core.MotionPhoto;
@@ -9,7 +10,13 @@ namespace PicView.Core.Gallery;
 public class GalleryCoordinator(TabViewModel tab, IThumbnailLoader thumbnailLoader, IThumbnailCache thumbnailCache)
     : IDisposable
 {
+    /// Larger thumbnails than this cost more memory than they add detail at gallery sizes
+    private const uint MaxFlowThumbnailHeight = 1024;
+
     private CancellationTokenSource? _cts;
+
+    // The height each cached thumbnail was decoded at, so a layout that shows it larger can replace it
+    private readonly ConcurrentDictionary<string, uint> _thumbnailHeights = new(StringComparer.OrdinalIgnoreCase);
 
     public void LoadGallery(IReadOnlyList<FileInfo> files, CoreViewModel core)
     {
@@ -69,6 +76,11 @@ public class GalleryCoordinator(TabViewModel tab, IThumbnailLoader thumbnailLoad
 #pragma warning restore MA0042
                         item.PixelWidth = magick.Width;
                         item.PixelHeight = magick.Height;
+                        if (IsRotatedByOrientation(magick))
+                        {
+                            // The thumbnails are rotated upright, lay them out by their rotated size
+                            (item.PixelWidth, item.PixelHeight) = (item.PixelHeight, item.PixelWidth);
+                        }
 
                         var profile = magick.GetProfile("xmp");
                         if (profile is not null)
@@ -98,18 +110,21 @@ public class GalleryCoordinator(TabViewModel tab, IThumbnailLoader thumbnailLoad
                     // 2. Assign the lazy-loading logic, but don't execute it!
                     item.ThumbnailLoaderFunc = async cancellationToken =>
                     {
-                        if (thumbnailCache.TryGet(file.FullName, out var cached) && cached is not null)
+                        var height = GetThumbnailHeight(item, (uint)maxHeight, core);
+                        if (thumbnailCache.TryGet(file.FullName, out var cached) && cached is not null &&
+                            (!_thumbnailHeights.TryGetValue(file.FullName, out var cachedHeight) || height <= cachedHeight))
                         {
                             return cached;
                         }
 
                         return await Task.Run(async () =>
                         {
-                            var thumb = await thumbnailLoader.GetThumbnailAsync(file, (uint)maxHeight, core)
+                            var thumb = await thumbnailLoader.GetThumbnailAsync(file, height, core)
                                 .ConfigureAwait(false);
                             if (thumb is not null)
                             {
                                 thumbnailCache.Add(tab.Id, file.FullName, thumb);
+                                _thumbnailHeights[file.FullName] = height;
                             }
 
                             item.IsMotionPhoto.Value = MotionPhotoDetector.TryDetect(item.FileInfo, xmpPacket, fastMode: true) is not null;
@@ -138,6 +153,46 @@ public class GalleryCoordinator(TabViewModel tab, IThumbnailLoader thumbnailLoad
         }
 
         tab.Gallery.LoadingState = GalleryLoadingState.Loaded;
+    }
+
+    private static bool IsRotatedByOrientation(MagickImage magick)
+    {
+        var orientation = magick.Orientation;
+        if (orientation is Orientation.Undefined)
+        {
+            var value = magick.GetExifProfile()?.GetValue(ExifTag.Orientation)?.Value;
+            if (value is >= (ushort)Orientation.TopLeft and <= (ushort)Orientation.LeftBottom)
+            {
+                orientation = (Orientation)value.Value;
+            }
+        }
+
+        return orientation is Orientation.LeftTop or Orientation.RightTop
+            or Orientation.RightBottom or Orientation.LeftBottom;
+    }
+
+    /// <summary>
+    /// Gets the height to decode a thumbnail at. The masonry and row layouts show thumbnails larger than the
+    /// item size, so they get them at the size they are shown at, in physical pixels.
+    /// </summary>
+    private uint GetThumbnailHeight(GalleryItemViewModel item, uint defaultHeight, CoreViewModel core)
+    {
+        if (item.DisplayHeight <= 0 || Settings.Gallery.ExpandedGalleryLayout is GalleryLayout.Columns ||
+            !tab.Gallery.IsGalleryExpanded.CurrentValue)
+        {
+            return defaultHeight;
+        }
+
+        // The thumbnail fills the item, cropped to its aspect ratio, so it has to cover both its width and height
+        var height = item.DisplayHeight;
+        if (item.PixelWidth > 0 && item.PixelHeight > 0)
+        {
+            height = Math.Max(height, item.DisplayWidth * item.PixelHeight / item.PixelWidth);
+        }
+
+        height *= Math.Max(1, core.GallerySettings.ThumbnailScaling);
+        var maxHeight = item.PixelHeight > 0 ? Math.Min(item.PixelHeight, MaxFlowThumbnailHeight) : MaxFlowThumbnailHeight;
+        return Math.Max(defaultHeight, Math.Min((uint)Math.Ceiling(height), maxHeight));
     }
 
     public void ReloadGallery(IReadOnlyList<FileInfo> files, CoreViewModel core)

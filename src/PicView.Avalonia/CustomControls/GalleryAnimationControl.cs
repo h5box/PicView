@@ -21,6 +21,9 @@ public class GalleryAnimationControl : UserControl
     
     private const int ZeroSize = 0;
 
+    /// Set while the expanded gallery shows masonry columns or justified rows, for the gallery item styles
+    private const string FlowLayoutClass = "flowLayout";
+
 
     private TabViewModel? TabViewModel => DataContext as TabViewModel;
     private Control? _parentControl;
@@ -78,6 +81,43 @@ public class GalleryAnimationControl : UserControl
 
         return Math.Max(0, availableHeight);
     }
+
+    private double GetExpandedWrapWidth()
+    {
+        if (_parentControl is null)
+        {
+            return double.NaN;
+        }
+
+        var availableWidth = _parentControl.Bounds.Width
+            - GetExpandedMargin.Left
+            - GetExpandedMargin.Right
+            - SizeDefaults.VerticalScrollbarSize
+            - BorderThickness.Left
+            - BorderThickness.Right;
+
+        return Math.Max(0, availableWidth);
+    }
+
+    /// <summary>
+    /// Keeps the expanded layout from rewrapping while the size of the gallery is animated.
+    /// </summary>
+    private void LockExpandedWrap()
+    {
+        _itemsPanel.WrapHeightOverride = GetExpandedWrapHeight();
+        _itemsPanel.WrapWidthOverride = GetExpandedWrapWidth();
+    }
+
+    private void UnlockExpandedWrap()
+    {
+        _itemsPanel.WrapHeightOverride = double.NaN;
+        _itemsPanel.WrapWidthOverride = double.NaN;
+    }
+
+    private static GalleryLayout ExpandedGalleryLayout =>
+        Application.Current?.DataContext is CoreViewModel core
+            ? core.GallerySettings.ExpandedGalleryLayout.CurrentValue
+            : Settings.Gallery.ExpandedGalleryLayout;
 
     private static bool IsHorizontalDock(GalleryDockPosition dock) => dock is GalleryDockPosition.Top or GalleryDockPosition.Bottom;
 
@@ -159,6 +199,21 @@ public class GalleryAnimationControl : UserControl
             }, DebugHelper.LogError(nameof(GalleryAnimationControl), nameof(UpdateExpandedItemHeight)))
         .AddTo(ref _disposables);
         
+        core.GallerySettings.ExpandedGalleryLayout.Skip(1).Subscribe(_ =>
+            {
+                if (ActiveGalleryMode is not GalleryMode.Expanded || IsInAnimation)
+                {
+                    return;
+                }
+
+                SetExpandedLayout(Settings.Gallery.DockPosition);
+                Dispatcher.UIThread.Post(() =>
+                {
+                    _viewer.ScrollToCenterOfCurrentItem();
+                }, DispatcherPriority.Render);
+            }, DebugHelper.LogError(nameof(GalleryAnimationControl), nameof(core.GallerySettings.ExpandedGalleryLayout)))
+        .AddTo(ref _disposables);
+
         core.GallerySettings.DockedGalleryStretchMode.Skip(1).Subscribe(mode =>
             {
                 SetDockedThumbs(mode);
@@ -261,8 +316,21 @@ public class GalleryAnimationControl : UserControl
 
     private void SetExpandedLayoutCore(GalleryDockPosition dock)
     {
+        var layout = ExpandedGalleryLayout;
+        var isFlowLayout = layout is not GalleryLayout.Columns;
+
+        // Set the layout before expanding, so the items are only recycled once
+        _itemsPanel.Layout = layout;
+        _itemsPanel.TargetItemSize = GalleryDefaults.GetFlowItemSize(layout, Settings.Gallery.ExpandedGalleryItemSize);
         _itemsPanel.IsExpanded = true;
-        _itemsPanel.WrapHeightOverride = double.NaN;
+        UnlockExpandedWrap();
+        // Few thumbnails start at the top in a vertically scrolling layout, instead of floating in the middle
+        _itemsPanel.VerticalAlignment = isFlowLayout ? VerticalAlignment.Top : VerticalAlignment.Center;
+        Classes.Set(FlowLayoutClass, isFlowLayout);
+        if (Application.Current?.DataContext is CoreViewModel core && TopLevel.GetTopLevel(this) is { } topLevel)
+        {
+            core.GallerySettings.ThumbnailScaling = topLevel.RenderScaling;
+        }
         
         if (_parentControl != null)
         {
@@ -280,7 +348,14 @@ public class GalleryAnimationControl : UserControl
 
         _itemsPanel?.Orientation = Orientation.Vertical;
         TabViewModel?.Gallery.ItemSpacing.Value = Settings.Gallery.ItemSpacing;
-        _viewer?.SetHorizontalScrolling();
+        if (isFlowLayout)
+        {
+            _viewer?.SetVerticalScrolling();
+        }
+        else
+        {
+            _viewer?.SetHorizontalScrolling();
+        }
         TabViewModel.Hoverbar.IsHoverbarVisible.Value = false;
     }
 
@@ -313,6 +388,7 @@ public class GalleryAnimationControl : UserControl
         }
         
         core.GallerySettings.ItemHeight.Value = itemHeight;
+        _itemsPanel.TargetItemSize = GalleryDefaults.GetFlowItemSize(_itemsPanel.Layout, itemHeight);
         _itemsPanel.InvalidateMeasure();
         _viewer.ScrollToCenterOfCurrentItem();
     }
@@ -359,6 +435,8 @@ public class GalleryAnimationControl : UserControl
     private void SetDockedLayoutCore(GalleryDockPosition dock, bool setSize)
     {
         _itemsPanel.IsExpanded = false;
+        _itemsPanel.VerticalAlignment = VerticalAlignment.Center;
+        Classes.Set(FlowLayoutClass, false);
         TabViewModel?.Gallery?.ItemSpacing.Value = 0;
         
         if (IsHorizontalDock(dock))
@@ -623,7 +701,7 @@ public class GalleryAnimationControl : UserControl
         SetExpandedThumbs();
 
         // LOCK the layout wrap constraint to the final calculated available size before animating
-        _itemsPanel.WrapHeightOverride = GetExpandedWrapHeight();
+        LockExpandedWrap();
 
         var startSize = GetDockedSize(dock);
         Dispatcher.UIThread.Post(() =>
@@ -655,7 +733,7 @@ public class GalleryAnimationControl : UserControl
         }
         
         // Unlock the layout and trigger remeasure to match exact final bounds
-        _itemsPanel.WrapHeightOverride = double.NaN;
+        UnlockExpandedWrap();
         _itemsPanel.InvalidateMeasure();
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -670,7 +748,7 @@ public class GalleryAnimationControl : UserControl
         var startHeight = _parentControl.Bounds.Height;
 
         // LOCK the layout wrap constraint so it doesn't wrap tighter as the window shrinks
-        _itemsPanel.WrapHeightOverride = GetExpandedWrapHeight();
+        LockExpandedWrap();
         
         if (IsHorizontalDock(dock))
         {
@@ -715,7 +793,7 @@ public class GalleryAnimationControl : UserControl
         SetDockedLayout(dock, true);
         
         // Unlock the layout before scrolling so measurements match docked mode
-        _itemsPanel.WrapHeightOverride = double.NaN;
+        UnlockExpandedWrap();
         _itemsPanel.InvalidateMeasure();
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -736,7 +814,7 @@ public class GalleryAnimationControl : UserControl
         SetExpandedThumbs();
 
         // Lock constraint and set expanded layout BEFORE animation for a smooth reveal
-        _itemsPanel.WrapHeightOverride = GetExpandedWrapHeight();
+        LockExpandedWrap();
         
         Dispatcher.UIThread.Post(() =>
         {
@@ -759,7 +837,7 @@ public class GalleryAnimationControl : UserControl
             Height = double.NaN;
         }
 
-        _itemsPanel.WrapHeightOverride = double.NaN;
+        UnlockExpandedWrap();
         _itemsPanel.InvalidateMeasure();
 
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -770,7 +848,7 @@ public class GalleryAnimationControl : UserControl
 
     private async Task ExpandedToClosed()
     {
-        _itemsPanel.WrapHeightOverride = GetExpandedWrapHeight();
+        LockExpandedWrap();
 
         await Task.WhenAll(
             AnimationsHelper.WidthAnimation(Bounds.Width, ZeroSize, GalleryDefaults.FastAnimationSpeed).RunAsync(this),
@@ -778,7 +856,7 @@ public class GalleryAnimationControl : UserControl
         ).ConfigureAwait(true);
 
         IsVisible = false;
-        _itemsPanel.WrapHeightOverride = double.NaN;
+        UnlockExpandedWrap();
         _itemsPanel.InvalidateMeasure();
 
         if (TopLevel.GetTopLevel(this) is MainWindow mainWindow)

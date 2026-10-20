@@ -25,11 +25,19 @@ public class NavigateAbleItemsViewer : ItemsControl
     
     private const double ScrollLineSize = 50;
 
+    // The masonry and row layouts scroll like a web page: further per notch, and eased
+    private const double FlowScrollLineSize = 100;
+    private const double SmoothScrollTimeConstant = 0.07;
+
     private AutoScrollViewer? _scrollViewer;
 
     private IDisposable? _viewportSubscription;
 
     private bool _isScrollToCenterDeferred;
+
+    private double _smoothScrollTarget = double.NaN;
+    private double _smoothScrollLastOffset;
+    private TimeSpan? _smoothScrollLastFrame;
 
     protected override Type StyleKeyOverride => typeof(NavigateAbleItemsViewer);
 
@@ -319,6 +327,11 @@ public class NavigateAbleItemsViewer : ItemsControl
                  extent.Height > viewport.Height)
         {
             var maxY = extent.Height - viewport.Height;
+            if (ItemsPanelRoot is VirtualizingGallery { IsFlowLayout: true })
+            {
+                SmoothScrollTo(maxY, delta * FlowScrollLineSize);
+                return;
+            }
             offset = offset.WithY(Math.Clamp(offset.Y - delta * ScrollLineSize, 0, maxY));
         }
         else
@@ -327,6 +340,55 @@ public class NavigateAbleItemsViewer : ItemsControl
         }
 
         _scrollViewer.SetCurrentValue(ScrollViewer.OffsetProperty, offset);
+    }
+
+    private void SmoothScrollTo(double maxY, double distance)
+    {
+        var isScrolling = !double.IsNaN(_smoothScrollTarget);
+        var from = isScrolling ? _smoothScrollTarget : _scrollViewer.Offset.Y;
+        _smoothScrollTarget = Math.Clamp(from - distance, 0, maxY);
+        if (isScrolling || TopLevel.GetTopLevel(this) is not { } topLevel)
+        {
+            return;
+        }
+
+        _smoothScrollLastOffset = _scrollViewer.Offset.Y;
+        _smoothScrollLastFrame = null;
+        topLevel.RequestAnimationFrame(OnSmoothScrollFrame);
+    }
+
+    private void OnSmoothScrollFrame(TimeSpan time)
+    {
+        if (double.IsNaN(_smoothScrollTarget) || _scrollViewer is null)
+        {
+            return;
+        }
+
+        var offset = _scrollViewer.Offset;
+        if (Math.Abs(offset.Y - _smoothScrollLastOffset) > 1)
+        {
+            // Scrolled some other way meanwhile, e.g. by the scroll bar or to the current item
+            _smoothScrollTarget = double.NaN;
+            return;
+        }
+
+        var elapsed = _smoothScrollLastFrame is { } lastFrame ? (time - lastFrame).TotalSeconds : 1.0 / 60;
+        _smoothScrollLastFrame = time;
+        var remaining = _smoothScrollTarget - offset.Y;
+        var y = Math.Abs(remaining) < 1
+            ? _smoothScrollTarget
+            : offset.Y + remaining * (1 - Math.Exp(-elapsed / SmoothScrollTimeConstant));
+
+        _scrollViewer.SetCurrentValue(ScrollViewer.OffsetProperty, offset.WithY(y));
+        _smoothScrollLastOffset = _scrollViewer.Offset.Y;
+        var isStuck = Math.Abs(_smoothScrollLastOffset - offset.Y) < 0.01; // E.g. the extent shrank below the target
+        if (isStuck || Math.Abs(_smoothScrollTarget - _smoothScrollLastOffset) < 0.5 || TopLevel.GetTopLevel(this) is not { } topLevel)
+        {
+            _smoothScrollTarget = double.NaN;
+            return;
+        }
+
+        topLevel.RequestAnimationFrame(OnSmoothScrollFrame);
     }
 
     /// <summary>
@@ -494,6 +556,17 @@ public class NavigateAbleItemsViewer : ItemsControl
 
         var currentItemPos = items.FirstOrDefault(x => x.Index == startIndex);
 
+        if (ItemsPanelRoot is VirtualizingGallery { IsFlowLayout: true } flowGallery)
+        {
+            var flowTarget = GetFlowTarget(direction, currentItemPos, items, flowGallery.Layout);
+            if (flowTarget is { } flowIndex && flowIndex != startIndex)
+            {
+                UpdateSelectionIndex(flowIndex);
+                ScrollItemIntoView(flowIndex);
+            }
+            return;
+        }
+
         var targetItem = direction switch
         {
             // If there's no item directly above, wrap to the bottom of the previous column
@@ -578,6 +651,59 @@ public class NavigateAbleItemsViewer : ItemsControl
         }
 
         return list;
+    }
+
+    /// <summary>
+    /// Finds the item to move to in the masonry and row layouts: the nearest item in the direction that overlaps
+    /// the current one, so up and down stay in a masonry column. Left and right follow the reading order of rows.
+    /// </summary>
+    private int? GetFlowTarget(NavigationDirection direction, ItemPosition current, List<ItemPosition> items, GalleryLayout layout)
+    {
+        if (layout is GalleryLayout.Rows && direction is NavigationDirection.Left or NavigationDirection.Right)
+        {
+            var index = current.Index + (direction is NavigationDirection.Left ? -1 : 1);
+            return index >= 0 && index < ItemCount ? index : null;
+        }
+
+        var isVertical = direction is NavigationDirection.Up or NavigationDirection.Down;
+        var currentRect = new Rect(current.Position, current.Size);
+        int? best = null;
+        var bestDistance = double.MaxValue;
+        var bestOffset = double.MaxValue;
+
+        foreach (var item in items)
+        {
+            var rect = new Rect(item.Position, item.Size);
+            var distance = direction switch
+            {
+                NavigationDirection.Up => currentRect.Top - rect.Bottom,
+                NavigationDirection.Down => rect.Top - currentRect.Bottom,
+                NavigationDirection.Left => currentRect.Left - rect.Right,
+                NavigationDirection.Right => rect.Left - currentRect.Right,
+                _ => -1
+            };
+            var overlap = isVertical
+                ? Math.Min(rect.Right, currentRect.Right) - Math.Max(rect.Left, currentRect.Left)
+                : Math.Min(rect.Bottom, currentRect.Bottom) - Math.Max(rect.Top, currentRect.Top);
+
+            // Allow for rounding where the spacing is zero
+            if (item.Index == current.Index || distance < -0.5 || overlap <= 0)
+            {
+                continue;
+            }
+
+            var offset = isVertical
+                ? Math.Abs(rect.Center.X - currentRect.Center.X)
+                : Math.Abs(rect.Center.Y - currentRect.Center.Y);
+            if (distance < bestDistance - 0.5 || (Math.Abs(distance - bestDistance) <= 0.5 && offset < bestOffset))
+            {
+                best = item.Index;
+                bestDistance = distance;
+                bestOffset = offset;
+            }
+        }
+
+        return best;
     }
 
     private static ItemPosition? GetClosestItemAbove(ItemPosition currentItem, IEnumerable<ItemPosition> items)

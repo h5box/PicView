@@ -15,6 +15,7 @@ public class GallerySharedSettingsViewModel
     public BindableReactiveProperty<object> GalleryStretch { get; } = new();
     public ReactiveCommand<GalleryStretchMode> SetDockedStretchModeCommand { get; } = new();
     public ReactiveCommand<GalleryStretchMode> SetExpandedStretchModeCommand { get; } = new();
+    public ReactiveCommand<GalleryLayout> SetExpandedLayoutCommand { get; } = new();
     
     public BindableReactiveProperty<bool> IsDockedStretchUniform { get; } =
         new(Settings.Gallery.DockedGalleryStretchMode == GalleryStretchMode.Uniform);
@@ -33,6 +34,13 @@ public class GallerySharedSettingsViewModel
         new(Settings.Gallery.ExpandedGalleryStretchMode == GalleryStretchMode.Square);
     public BindableReactiveProperty<bool> IsExpandedStretchSquareFill { get; } =
         new(Settings.Gallery.ExpandedGalleryStretchMode == GalleryStretchMode.FillSquare);
+
+    public BindableReactiveProperty<bool> IsExpandedLayoutColumns { get; } =
+        new(Settings.Gallery.ExpandedGalleryLayout == GalleryLayout.Columns);
+    public BindableReactiveProperty<bool> IsExpandedLayoutMasonry { get; } =
+        new(Settings.Gallery.ExpandedGalleryLayout == GalleryLayout.Masonry);
+    public BindableReactiveProperty<bool> IsExpandedLayoutRows { get; } =
+        new(Settings.Gallery.ExpandedGalleryLayout == GalleryLayout.Rows);
 
     public BindableReactiveProperty<bool> IsDockedGalleryShownInHiddenUI { get; } =
         new(Settings.Gallery.ShowDockedGalleryInHiddenUI);
@@ -67,6 +75,14 @@ public class GallerySharedSettingsViewModel
     public BindableReactiveProperty<GalleryStretchMode> ExpandedGalleryStretchMode { get; } =
         new(Settings.Gallery.ExpandedGalleryStretchMode);
 
+    public BindableReactiveProperty<GalleryLayout> ExpandedGalleryLayout { get; } =
+        new(Settings.Gallery.ExpandedGalleryLayout);
+
+    /// <summary>
+    /// The render scaling of the window the gallery is shown in, to decode thumbnails at their size in physical pixels.
+    /// </summary>
+    public double ThumbnailScaling { get; set; } = 1;
+
     public void Initialize()
     {
         if (_isInitialized)
@@ -86,6 +102,11 @@ public class GallerySharedSettingsViewModel
         SetExpandedStretchModeCommand.Subscribe(mode =>
         {
             GallerySettingsConverter.UpdateExpandedGalleryStretchMode(this, mode);
+        }, DebugHelper.LogError(nameof(GallerySharedSettingsViewModel), nameof(Initialize)));
+
+        SetExpandedLayoutCommand.Subscribe(layout =>
+        {
+            ExpandedGalleryLayout.Value = layout;
         }, DebugHelper.LogError(nameof(GallerySharedSettingsViewModel), nameof(Initialize)));
         
         ToggleGalleryVisibilitySubscription();
@@ -125,6 +146,12 @@ public class GallerySharedSettingsViewModel
             {
                 ExpandedGalleryStretchMode.Value = x;
             }, DebugHelper.LogError(nameof(GallerySharedSettingsViewModel), nameof(ExpandedGalleryStretchMode)));
+
+        Observable.EveryValueChanged(Settings.Gallery, x => x.ExpandedGalleryLayout)
+            .Subscribe(x =>
+            {
+                ExpandedGalleryLayout.Value = x;
+            }, DebugHelper.LogError(nameof(GallerySharedSettingsViewModel), nameof(ExpandedGalleryLayout)));
 
 
         DockedGalleryItemSize
@@ -191,6 +218,19 @@ public class GallerySharedSettingsViewModel
                 await SaveSettingsAsync().ConfigureAwait(false);
             }, DebugHelper.LogError(nameof(GallerySharedSettingsViewModel), nameof(ExpandedGalleryStretchMode)));
 
+        ExpandedGalleryLayout
+            .Skip(1)
+            .SubscribeAwait(async (newLayout, _) =>
+            {
+                GallerySettingsConverter.UpdateExpandedGalleryLayout(this, newLayout);
+                if (Settings.Gallery.ExpandedGalleryLayout == newLayout)
+                {
+                    return;
+                }
+
+                Settings.Gallery.ExpandedGalleryLayout = newLayout;
+                await SaveSettingsAsync().ConfigureAwait(false);
+            }, DebugHelper.LogError(nameof(GallerySharedSettingsViewModel), nameof(ExpandedGalleryLayout)));
     }
 
     private void ToggleGalleryVisibilitySubscription()

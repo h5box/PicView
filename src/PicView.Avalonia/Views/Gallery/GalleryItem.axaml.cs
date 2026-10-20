@@ -21,6 +21,9 @@ namespace PicView.Avalonia.Views.Gallery;
 
 public partial class GalleryItem : NavigateAbleItem
 {
+    private const string LoadedClass = "loaded";
+    private const string FadeInClass = "fadeIn";
+
     private CancellationTokenSource? _loadCts;
     private DisposableBag _disposables;
 
@@ -29,6 +32,7 @@ public partial class GalleryItem : NavigateAbleItem
         InitializeComponent();
         GalleryContextMenu.Opened += GalleryContextMenuOnOpened;
         GalleryContextMenu.Closed += GalleryContextMenuOnClosed;
+        GalleryImage.PropertyChanged += GalleryImageOnPropertyChanged;
         if (Application.Current.DataContext is not CoreViewModel core)
         {
             return;
@@ -50,7 +54,10 @@ public partial class GalleryItem : NavigateAbleItem
         }, DebugHelper.LogError(nameof(GalleryItem), nameof(core.GallerySettings.DockedGalleryStretchMode)))
         .AddTo(ref _disposables);
         
-        core.GallerySettings.ExpandedGalleryStretchMode.Subscribe(x =>
+        // The masonry and row layouts size each item to its aspect ratio, fill it so the rounded corners are covered
+        core.GallerySettings.ExpandedGalleryStretchMode.CombineLatest(core.GallerySettings.ExpandedGalleryLayout,
+                (mode, layout) => layout is GalleryLayout.Columns ? mode : GalleryStretchMode.UniformToFill)
+            .Subscribe(x =>
         {
             if (!core.MainWindows.ActiveWindow.CurrentValue.WindowTabs.ActiveTab.CurrentValue.Gallery.IsGalleryExpanded.CurrentValue)
             {
@@ -120,6 +127,26 @@ public partial class GalleryItem : NavigateAbleItem
             return;
         }
         vm.Image.Value = null;
+    }
+
+    private void GalleryImageOnPropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (e.Property != Image.SourceProperty)
+        {
+            return;
+        }
+
+        if (e.NewValue is null)
+        {
+            GalleryImage.Classes.Remove(FadeInClass);
+            GalleryImage.Classes.Remove(LoadedClass);
+            return;
+        }
+
+        // A cached thumbnail arrives before the item is first arranged, show it right away instead of fading it in
+        // every time it's scrolled back into view
+        GalleryImage.Classes.Set(FadeInClass, Bounds.Width > 0);
+        GalleryImage.Classes.Set(LoadedClass, true);
     }
 
     private void GalleryContextMenuOnClosed(object? sender, RoutedEventArgs e)
@@ -313,6 +340,7 @@ public partial class GalleryItem : NavigateAbleItem
         base.OnDetachedFromLogicalTree(e);
         GalleryContextMenu.Opened -= GalleryContextMenuOnOpened;
         GalleryContextMenu.Closed -= GalleryContextMenuOnClosed;
+        GalleryImage.PropertyChanged -= GalleryImageOnPropertyChanged;
         _disposables.Dispose();
     }
 }

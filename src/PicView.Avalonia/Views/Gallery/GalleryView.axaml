@@ -10,11 +10,115 @@
     ActiveGalleryMode="{CompiledBinding Gallery.ActiveGalleryMode.Value}"
     Background="{DynamicResource GalleryBackgroundColor}"
     BorderBrush="{DynamicResource GalleryBorderColor}">
+    <customControls:GalleryAnimationControl.Styles>
+        <Style Selector="customControls|NavigateAbleItem.galleryItem">
+            <Setter Property="Width" Value="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.ItemWidth.Value, Mode=OneWay}" />
+            <Setter Property="Height" Value="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.ItemHeight.Value, Mode=OneWay}" />
+            <Setter Property="Margin" Value="1" />
+            <Setter Property="Background" Value="{DynamicResource GalleryItemBackgroundColor}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource GalleryItemBorderColor}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+        <Style Selector="customControls|NavigateAbleItem.galleryItem Panel.thumbPanel">
+            <Setter Property="Margin" Value="1" />
+        </Style>
+        <Style Selector="customControls|NavigateAbleItem.galleryItem Border.selectionRing">
+            <Setter Property="IsVisible" Value="False" />
+        </Style>
+
+        <!--  Masonry and rows: the panel sizes the items, which are rounded and borderless, and fade in when loaded  -->
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem">
+            <Setter Property="Width" Value="NaN" />
+            <Setter Property="Height" Value="NaN" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="8" />
+        </Style>
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem /template/ Border#border">
+            <Setter Property="ClipToBounds" Value="True" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem Panel.thumbPanel">
+            <Setter Property="Margin" Value="0" />
+        </Style>
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem Border.selectionRing">
+            <Setter Property="IsVisible" Value="True" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="BorderThickness" Value="2" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+        </Style>
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem:selectedItem Border.selectionRing">
+            <Setter Property="BorderBrush" Value="{DynamicResource SecondaryAccentColor}" />
+        </Style>
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem:contextMenuOpen Border.selectionRing">
+            <Setter Property="BorderBrush" Value="{DynamicResource SecondaryAccentColor}" />
+        </Style>
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem:currentItem Border.selectionRing">
+            <Setter Property="BorderBrush" Value="{DynamicResource AccentColor}" />
+        </Style>
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem customControls|ThumbImage">
+            <Setter Property="Opacity" Value="0" />
+            <Setter Property="RenderTransform" Value="scale(1.04)" />
+        </Style>
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem customControls|ThumbImage.fadeIn">
+            <Setter Property="Transitions">
+                <Transitions>
+                    <DoubleTransition
+                        Easing="CubicEaseOut"
+                        Property="Opacity"
+                        Duration="0:0:0.32" />
+                    <TransformOperationsTransition
+                        Easing="CubicEaseOut"
+                        Property="RenderTransform"
+                        Duration="0:0:0.36" />
+                </Transitions>
+            </Setter>
+        </Style>
+        <Style Selector="gallery|GalleryView.flowLayout customControls|NavigateAbleItem.galleryItem customControls|ThumbImage.loaded">
+            <Setter Property="Opacity" Value="1" />
+            <Setter Property="RenderTransform" Value="scale(1)" />
+        </Style>
+    </customControls:GalleryAnimationControl.Styles>
     <Panel>
 
         <Panel.ContextMenu>
             <ContextMenu>
-                <customControls:StyledMenuItem Header="{Binding ParentWindowContext.Translation.Stretch.Value, Mode=OneWay}" IsVisible="{CompiledBinding Gallery.IsGalleryExpanded.Value}">
+                <customControls:StyledMenuItem Header="{Binding ParentWindowContext.Translation.GalleryLayout.Value, Mode=OneWay}" IsVisible="{CompiledBinding Gallery.IsGalleryExpanded.Value}">
+                    <MenuItem.Icon>
+                        <Path
+                            Width="12"
+                            Height="12"
+                            Data="{StaticResource GalleryGeometry}"
+                            Fill="{DynamicResource MainTextColor}"
+                            Stretch="Fill" />
+                    </MenuItem.Icon>
+                    <customControls:StyledMenuItem
+                        Command="{Binding ParentWindowContext.GallerySettings.SetExpandedLayoutCommand}"
+                        CommandParameter="{x:Static gallerySettings:GalleryLayout.Masonry}"
+                        Header="{Binding ParentWindowContext.Translation.Masonry.Value, Mode=OneWay}"
+                        IsChecked="{Binding ParentWindowContext.GallerySettings.IsExpandedLayoutMasonry.Value}"
+                        ToggleType="Radio" />
+                    <customControls:StyledMenuItem
+                        Command="{Binding ParentWindowContext.GallerySettings.SetExpandedLayoutCommand}"
+                        CommandParameter="{x:Static gallerySettings:GalleryLayout.Rows}"
+                        Header="{Binding ParentWindowContext.Translation.Rows.Value, Mode=OneWay}"
+                        IsChecked="{Binding ParentWindowContext.GallerySettings.IsExpandedLayoutRows.Value}"
+                        ToggleType="Radio" />
+                    <customControls:StyledMenuItem
+                        Command="{Binding ParentWindowContext.GallerySettings.SetExpandedLayoutCommand}"
+                        CommandParameter="{x:Static gallerySettings:GalleryLayout.Columns}"
+                        Header="{Binding ParentWindowContext.Translation.Columns.Value, Mode=OneWay}"
+                        IsChecked="{Binding ParentWindowContext.GallerySettings.IsExpandedLayoutColumns.Value}"
+                        ToggleType="Radio" />
+                </customControls:StyledMenuItem>
+                <!--  The thumbnails of the masonry and row layouts always fill their aspect ratio  -->
+                <customControls:StyledMenuItem Header="{Binding ParentWindowContext.Translation.Stretch.Value, Mode=OneWay}">
+                    <customControls:StyledMenuItem.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="Gallery.IsGalleryExpanded.Value" />
+                            <Binding Path="ParentWindowContext.GallerySettings.IsExpandedLayoutColumns.Value" />
+                        </MultiBinding>
+                    </customControls:StyledMenuItem.IsVisible>
                     <MenuItem.Icon>
                         <Image Classes="SquareDimensionsImage" />
                     </MenuItem.Icon>

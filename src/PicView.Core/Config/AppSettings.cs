@@ -265,6 +265,11 @@ public class Gallery
     /// </summary>
     public GalleryStretchMode ExpandedGalleryStretchMode { get; set; } = GalleryStretchMode.Uniform;
     public GalleryStretchMode DockedGalleryStretchMode { get; set; } = GalleryStretchMode.UniformToFill;
+
+    /// <summary>
+    /// Determines how thumbnails are arranged, when the gallery is in full/expanded mode.
+    /// </summary>
+    public GalleryLayout ExpandedGalleryLayout { get; set; } = GalleryLayout.Masonry;
     
     /// <summary>
     /// Determines whether the docked gallery is shown when the user interface is hidden.

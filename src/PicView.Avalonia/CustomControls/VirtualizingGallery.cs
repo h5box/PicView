@@ -14,6 +14,7 @@ namespace PicView.Avalonia.CustomControls;
 /// <summary>
 ///     A virtualizing wrap panel for image galleries supporting variable item widths with fixed item height,
 ///     horizontal or vertical orientation, and container recycling.
+///     When expanded, it can also lay the items out in vertically scrolling masonry columns or justified rows.
 /// </summary>
 public class VirtualizingGallery : VirtualizingPanel
 {
@@ -40,6 +41,16 @@ public class VirtualizingGallery : VirtualizingPanel
     public static readonly StyledProperty<double> WrapHeightOverrideProperty =
         AvaloniaProperty.Register<VirtualizingGallery, double>(nameof(WrapHeightOverride), double.NaN);
 
+    public static readonly StyledProperty<double> WrapWidthOverrideProperty =
+        AvaloniaProperty.Register<VirtualizingGallery, double>(nameof(WrapWidthOverride), double.NaN);
+
+    public static readonly StyledProperty<GalleryLayout> LayoutProperty =
+        AvaloniaProperty.Register<VirtualizingGallery, GalleryLayout>(nameof(Layout));
+
+    public static readonly StyledProperty<double> TargetItemSizeProperty =
+        AvaloniaProperty.Register<VirtualizingGallery, double>(nameof(TargetItemSize),
+            GalleryDefaults.DefaultExpandedGalleryHeight);
+
     static VirtualizingGallery()
     {
         AffectsMeasure<VirtualizingGallery>(
@@ -48,7 +59,10 @@ public class VirtualizingGallery : VirtualizingPanel
             ItemWidthProperty,
             ItemSpacingProperty,
             LineSpacingProperty,
-            WrapHeightOverrideProperty);
+            WrapHeightOverrideProperty,
+            WrapWidthOverrideProperty,
+            LayoutProperty,
+            TargetItemSizeProperty);
     }
     
     public readonly record struct RealizedGalleryItem(int Index, Control Element);
@@ -106,16 +120,52 @@ public class VirtualizingGallery : VirtualizingPanel
         set => SetValue(WrapHeightOverrideProperty, value);
     }
 
+    /// <summary>
+    /// The width the masonry columns and justified rows are fitted to, instead of the available width.
+    /// <remarks>Used to keep the layout from reflowing while the gallery is animated.</remarks>
+    /// </summary>
+    public double WrapWidthOverride
+    {
+        get => GetValue(WrapWidthOverrideProperty);
+        set => SetValue(WrapWidthOverrideProperty, value);
+    }
+
+    /// <summary>
+    /// How the items are arranged when expanded.
+    /// </summary>
+    public GalleryLayout Layout
+    {
+        get => GetValue(LayoutProperty);
+        set => SetValue(LayoutProperty, value);
+    }
+
+    /// <summary>
+    /// The minimum column width of <see cref="GalleryLayout.Masonry"/>,
+    /// or the row height <see cref="GalleryLayout.Rows"/> starts from before a row is fitted to the width.
+    /// </summary>
+    public double TargetItemSize
+    {
+        get => GetValue(TargetItemSizeProperty);
+        set => SetValue(TargetItemSizeProperty, value);
+    }
+
     public bool IsExpanded
     {
         get;
         set
         {
             if (field == value) return;
+            var wasFlowLayout = IsFlowLayout;
             field = value;
+            OnFlowLayoutChanged(wasFlowLayout);
             InvalidateMeasure();
         }
     }
+
+    /// <summary>
+    /// Whether the items are laid out in masonry columns or justified rows, scrolling vertically.
+    /// </summary>
+    public bool IsFlowLayout => IsExpanded && Layout is not GalleryLayout.Columns;
 
     public Rect? GetItemBounds(int index)
     {
@@ -134,6 +184,12 @@ public class VirtualizingGallery : VirtualizingPanel
         }
 
         var snapPoints = new List<double>();
+
+        if (IsFlowLayout)
+        {
+            // Rows and columns of different sizes have nothing sensible to snap to
+            return [];
+        }
 
         // Only provide snap points when the requested orientation matches our layout's scroll axis
         var isVerticalDocked = !IsExpanded && Orientation == Orientation.Vertical;
@@ -196,6 +252,22 @@ public class VirtualizingGallery : VirtualizingPanel
             _viewport = default;
             RecycleAllItems();
         }
+        else if (change.Property == LayoutProperty && IsExpanded)
+        {
+            OnFlowLayoutChanged(change.GetOldValue<GalleryLayout>() is not GalleryLayout.Columns);
+        }
+    }
+
+    private void OnFlowLayoutChanged(bool wasFlowLayout)
+    {
+        if (wasFlowLayout == IsFlowLayout)
+        {
+            return;
+        }
+
+        // The scroll axis changes, and the items are styled differently, so start over with fresh containers
+        _viewport = default;
+        RecycleAllItems();
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -245,6 +317,11 @@ public class VirtualizingGallery : VirtualizingPanel
         if (Items is not IEnumerable<object> items)
         {
             return new Size();
+        }
+
+        if (IsFlowLayout)
+        {
+            return CalculateFlowBounds(items, availableSize);
         }
 
         double currentX = 0;
@@ -334,6 +411,118 @@ public class VirtualizingGallery : VirtualizingPanel
         return new Size(totalWidth, totalHeight);
     }
 
+    private Size CalculateFlowBounds(IEnumerable<object> items, Size availableSize)
+    {
+        var width = double.IsNaN(WrapWidthOverride) || WrapWidthOverride <= 0
+            ? availableSize.Width
+            : WrapWidthOverride;
+        var targetSize = TargetItemSize > 0 ? TargetItemSize : GalleryDefaults.DefaultExpandedGalleryHeight;
+        if (double.IsInfinity(width) || width <= 0)
+        {
+            // Not constrained yet, lay out a single column or a single item per row
+            width = targetSize;
+        }
+
+        var height = Layout is GalleryLayout.Rows
+            ? CalculateRowBounds(items, width, targetSize)
+            : CalculateMasonryBounds(items, width, targetSize);
+        return new Size(width, height);
+    }
+
+    /// <summary>
+    /// Places each item at the bottom of the shortest column, so the tops of the items never decrease with their index.
+    /// </summary>
+    private double CalculateMasonryBounds(IEnumerable<object> items, double width, double minColumnWidth)
+    {
+        var columnSpacing = LineSpacing;
+        var itemSpacing = ItemSpacing;
+        var columnCount = Math.Max(1, (int)Math.Floor((width + columnSpacing) / (minColumnWidth + columnSpacing)));
+        var columnWidth = Math.Max(1, (width - (columnCount - 1) * columnSpacing) / columnCount);
+        var columnHeights = new double[columnCount];
+
+        foreach (var item in items)
+        {
+            var column = 0;
+            for (var i = 1; i < columnCount; i++)
+            {
+                if (columnHeights[i] < columnHeights[column] - 0.5)
+                {
+                    column = i;
+                }
+            }
+
+            var itemHeight = columnWidth / GetAspectRatio(item);
+            var x = column * (columnWidth + columnSpacing);
+            _itemBounds.Add(new Rect(x, columnHeights[column], columnWidth, itemHeight));
+            columnHeights[column] += itemHeight + itemSpacing;
+        }
+
+        return Math.Max(0, columnHeights.Max() - itemSpacing);
+    }
+
+    /// <summary>
+    /// Fills rows at the target height until they are wider than the available width, then scales each row down to fit.
+    /// The last row keeps the target height.
+    /// </summary>
+    private double CalculateRowBounds(IEnumerable<object> items, double width, double targetHeight)
+    {
+        var itemSpacing = ItemSpacing;
+        var rowSpacing = LineSpacing;
+        var y = 0.0;
+        var rowStart = 0;
+        var ratioSum = 0.0;
+        var ratios = new List<double>();
+
+        foreach (var item in items)
+        {
+            var ratio = GetAspectRatio(item);
+            ratios.Add(ratio);
+            ratioSum += ratio;
+
+            var spacing = (ratios.Count - rowStart - 1) * itemSpacing;
+            if (ratioSum * targetHeight + spacing <= width)
+            {
+                continue;
+            }
+
+            var rowHeight = Math.Max(1, (width - spacing) / ratioSum);
+            AddRow(rowStart, ratios.Count, rowHeight);
+            y += rowHeight + rowSpacing;
+            rowStart = ratios.Count;
+            ratioSum = 0;
+        }
+
+        if (rowStart == ratios.Count)
+        {
+            return Math.Max(0, y - rowSpacing);
+        }
+
+        AddRow(rowStart, ratios.Count, targetHeight);
+        return y + targetHeight;
+
+        void AddRow(int start, int end, double rowHeight)
+        {
+            var x = 0.0;
+            for (var i = start; i < end; i++)
+            {
+                var itemWidth = rowHeight * ratios[i];
+                _itemBounds.Add(new Rect(x, y, itemWidth, rowHeight));
+                x += itemWidth + itemSpacing;
+            }
+        }
+    }
+
+    private static double GetAspectRatio(object item)
+    {
+        if (item is not GalleryItemViewModel { PixelWidth: > 0, PixelHeight: > 0 } vm)
+        {
+            return 1;
+        }
+
+        return Math.Clamp((double)vm.PixelWidth / vm.PixelHeight,
+            GalleryDefaults.MinFlowAspectRatio, GalleryDefaults.MaxFlowAspectRatio);
+    }
+
     /// <inheritdoc />
     protected override Size MeasureOverride(Size availableSize)
     {
@@ -358,7 +547,8 @@ public class VirtualizingGallery : VirtualizingPanel
                 double.IsInfinity(availableSize.Width) ? 0 : availableSize.Width,
                 double.IsInfinity(availableSize.Height) ? 0 : availableSize.Height);
         }
-        visibleRect = visibleRect.Inflate(new Thickness(ItemHeight * 2));
+        visibleRect = visibleRect.Inflate(new Thickness((IsFlowLayout ? TargetItemSize : ItemHeight) * 2));
+        var scrollsVertically = IsFlowLayout || Orientation == Orientation.Vertical && !IsExpanded;
 
         // 3. Find which indices fall inside the visible rect
         var startIndex = -1;
@@ -376,7 +566,7 @@ public class VirtualizingGallery : VirtualizingPanel
             else if (startIndex is not -1)
             {
                 // Early exit: We've completely passed the visible viewport
-                var pastViewport = Orientation == Orientation.Vertical && !IsExpanded
+                var pastViewport = scrollsVertically
                     ? _itemBounds[i].Y > visibleRect.Bottom
                     : _itemBounds[i].X > visibleRect.Right;
                 if (pastViewport)
@@ -417,6 +607,13 @@ public class VirtualizingGallery : VirtualizingPanel
                 RemoveInternalChild(container);
                 _realizedItems.RemoveAll(r => r.Element == container);
                 container = null;
+            }
+
+            if (IsFlowLayout && item is GalleryItemViewModel galleryItem)
+            {
+                // Read by the thumbnail loader when the container is prepared
+                galleryItem.DisplayWidth = _itemBounds[i].Width;
+                galleryItem.DisplayHeight = _itemBounds[i].Height;
             }
 
             if (container is null)

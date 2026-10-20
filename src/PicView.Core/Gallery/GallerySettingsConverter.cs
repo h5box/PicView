@@ -79,4 +79,11 @@ public static class GallerySettingsConverter
         gallerySettings.ExpandedGalleryStretchMode.Value = mode;
         Settings.Gallery.ExpandedGalleryStretchMode = mode;
     }
+
+    public static void UpdateExpandedGalleryLayout(GallerySharedSettingsViewModel gallerySettings, GalleryLayout layout)
+    {
+        gallerySettings.IsExpandedLayoutColumns.Value = layout == GalleryLayout.Columns;
+        gallerySettings.IsExpandedLayoutMasonry.Value = layout == GalleryLayout.Masonry;
+        gallerySettings.IsExpandedLayoutRows.Value = layout == GalleryLayout.Rows;
+    }
 }

@@ -78,6 +78,7 @@ public class LanguageModel
     public string? ColorPickerToolTooltip { get; set; }
     public string? ColorRepresentation { get; set; }
     public string? ColorTone { get; set; }
+    public string? Columns { get; set; }
     public string? Comment { get; set; }
     public string? CompressedBitsPixel { get; set; }
     public string? Compression { get; set; }
@@ -186,6 +187,7 @@ public class LanguageModel
     public string? Fstop { get; set; }
     public string? FullPath { get; set; }
     public string? Fullscreen { get; set; }
+    public string? GalleryLayout { get; set; }
     public string? GalleryMouseWheel { get; set; }
     public string? GallerySettings { get; set; }
     public string? GalleryThumbnailStretch { get; set; }
@@ -247,6 +249,7 @@ public class LanguageModel
     public string? Low { get; set; }
     public string? Manual { get; set; }
     public string? Margins { get; set; }
+    public string? Masonry { get; set; }
     public string? MaxAperture { get; set; }
     public string? Maximize { get; set; }
     public string? MegaPixels { get; set; }
@@ -358,6 +361,7 @@ public class LanguageModel
     public string? Reverse { get; set; }
     public string? Right { get; set; }
     public string? Rotated { get; set; }
+    public string? Rows { get; set; }
     public string? RotateLeft { get; set; }
     public string? RotateRight { get; set; }
     public string? Saturation { get; set; }

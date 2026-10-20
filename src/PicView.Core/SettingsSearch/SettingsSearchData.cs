@@ -333,7 +333,15 @@ public class SettingsSearchData
         sb.Append(space);
         sb.Append(TranslationManager.Translation.DockedGalleryThumbnailStretch);
         sb.Append(space);
-        sb.Append("Stretch Fill Uniform");
+        sb.Append(TranslationManager.Translation.GalleryLayout);
+        sb.Append(space);
+        sb.Append(TranslationManager.Translation.Masonry);
+        sb.Append(space);
+        sb.Append(TranslationManager.Translation.Rows);
+        sb.Append(space);
+        sb.Append(TranslationManager.Translation.Columns);
+        sb.Append(space);
+        sb.Append("Stretch Fill Uniform Layout Masonry Waterfall Justified Rows Columns");
         GalleryStretchSearchTags = sb.ToString();
         
         sb.Clear();

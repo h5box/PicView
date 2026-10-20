@@ -5,19 +5,13 @@
     xmlns:customControls="clr-namespace:PicView.Avalonia.CustomControls"
     xmlns:gallerySettings="clr-namespace:PicView.Core.Gallery;assembly=PicView.Core"
     xmlns:viewModels="clr-namespace:PicView.Core.ViewModels;assembly=PicView.Core"
-    Width="{CompiledBinding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.ItemWidth.Value,
-                            Mode=OneWay}"
-    Height="{CompiledBinding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.ItemHeight.Value,
-                             Mode=OneWay}"
-    Margin="1"
     x:DataType="viewModels:GalleryItemViewModel"
-    Background="{DynamicResource GalleryItemBackgroundColor}"
-    BorderBrush="{DynamicResource GalleryItemBorderColor}"
-    BorderThickness="1">
+    Classes="galleryItem">
+    <!--  Size, margin and border are set by the styles in GalleryView, they depend on the gallery layout  -->
     <Panel
         MinWidth="25"
         MinHeight="25"
-        Margin="1"
+        Classes="thumbPanel"
         ToolTip.HorizontalOffset="0"
         ToolTip.Placement="TopEdgeAlignedLeft"
         ToolTip.VerticalOffset="0">
@@ -56,6 +50,8 @@
                     StrokeThickness="2" />
             </Panel>
         </Border>
+        <!--  Highlights the current and selected item in the masonry and row layouts  -->
+        <Border Classes="selectionRing" IsHitTestVisible="False" />
         <ToolTip.Tip>
             <StackPanel MaxWidth="600">
                 <TextBlock
@@ -264,7 +260,42 @@
                 <Separator />
 
                 <!--  Expanded menu items  -->
-                <customControls:StyledMenuItem Header="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).Translation.Stretch.Value, Mode=OneWay}" IsVisible="{CompiledBinding $parent[Window].((viewModels:MainWindowViewModel)DataContext).WindowTabs.ActiveTab.Value.Gallery.IsGalleryExpanded.Value}">
+                <customControls:StyledMenuItem Header="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).Translation.GalleryLayout.Value, Mode=OneWay}" IsVisible="{CompiledBinding $parent[Window].((viewModels:MainWindowViewModel)DataContext).WindowTabs.ActiveTab.Value.Gallery.IsGalleryExpanded.Value}">
+                    <MenuItem.Icon>
+                        <Path
+                            Width="12"
+                            Height="12"
+                            Data="{StaticResource GalleryGeometry}"
+                            Fill="{DynamicResource MainTextColor}"
+                            Stretch="Fill" />
+                    </MenuItem.Icon>
+                    <customControls:StyledMenuItem
+                        Command="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.SetExpandedLayoutCommand}"
+                        CommandParameter="{x:Static gallerySettings:GalleryLayout.Masonry}"
+                        Header="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).Translation.Masonry.Value, Mode=OneWay}"
+                        IsChecked="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.IsExpandedLayoutMasonry.Value}"
+                        ToggleType="Radio" />
+                    <customControls:StyledMenuItem
+                        Command="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.SetExpandedLayoutCommand}"
+                        CommandParameter="{x:Static gallerySettings:GalleryLayout.Rows}"
+                        Header="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).Translation.Rows.Value, Mode=OneWay}"
+                        IsChecked="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.IsExpandedLayoutRows.Value}"
+                        ToggleType="Radio" />
+                    <customControls:StyledMenuItem
+                        Command="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.SetExpandedLayoutCommand}"
+                        CommandParameter="{x:Static gallerySettings:GalleryLayout.Columns}"
+                        Header="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).Translation.Columns.Value, Mode=OneWay}"
+                        IsChecked="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.IsExpandedLayoutColumns.Value}"
+                        ToggleType="Radio" />
+                </customControls:StyledMenuItem>
+                <!--  The thumbnails of the masonry and row layouts always fill their aspect ratio  -->
+                <customControls:StyledMenuItem Header="{Binding $parent[Window].((viewModels:MainWindowViewModel)DataContext).Translation.Stretch.Value, Mode=OneWay}">
+                    <customControls:StyledMenuItem.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="$parent[Window].((viewModels:MainWindowViewModel)DataContext).WindowTabs.ActiveTab.Value.Gallery.IsGalleryExpanded.Value" />
+                            <Binding Path="$parent[Window].((viewModels:MainWindowViewModel)DataContext).GallerySettings.IsExpandedLayoutColumns.Value" />
+                        </MultiBinding>
+                    </customControls:StyledMenuItem.IsVisible>
                     <MenuItem.Icon>
                         <Image Classes="SquareDimensionsImage" />
                     </MenuItem.Icon>
